@@ -1,6 +1,5 @@
-import React, { createContext, useContext, useState, ReactNode } from 'react';
-import { useLocalStorage } from '../hooks/useLocalStorage';
-import { User } from '../types';
+import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { supabase } from '../lib/supabaseClient';
 import * as authService from '../services/authService';
 import { getAutoClearDelay } from '../config';
 
@@ -11,13 +10,13 @@ interface ProfileMessage {
 
 interface AuthContextType {
   // State
-  user: User | null;
+  user: any | null;
   profileMessage: ProfileMessage | null;
   
   // Actions
   login: (email: string, password: string) => Promise<void>;
   register: (userData: { name: string; email: string; password: string; specialty?: string }) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
   updateUserProfile: (updates: { email?: string; passwordChanged?: boolean }) => void;
   setNotificationsEnabled: (enabled: boolean) => void;
   
@@ -41,8 +40,23 @@ interface AuthProviderProps {
 }
 
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children, onLogout }) => {
-  const [user, setUser] = useLocalStorage<User | null>('medshift-user', null);
+  const [user, setUser] = useState<any | null>(null);
   const [profileMessage, setProfileMessage] = useState<ProfileMessage | null>(null);
+
+  useEffect(() => {
+    const getUser = async () => {
+      const { data } = await supabase.auth.getUser();
+      setUser(data.user);
+    };
+    getUser();
+    // Listen for auth state changes
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+    return () => {
+      listener?.subscription.unsubscribe();
+    };
+  }, []);
 
   const clearProfileMessage = () => {
     setTimeout(() => setProfileMessage(null), getAutoClearDelay());
@@ -50,8 +64,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children, onLogout }
 
   const login = async (email: string, password: string) => {
     try {
-      const userData = await authService.login(email, password);
-      setUser(userData);
+      const user = await authService.login(email, password);
+      setUser(user);
     } catch (error: any) {
       alert(error.message);
     }
@@ -59,50 +73,28 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children, onLogout }
 
   const register = async (userData: { name: string; email: string; password: string; specialty?: string }) => {
     try {
-      const registeredUser = await authService.register(userData);
-      setUser(registeredUser);
+      const user = await authService.register(userData);
+      setUser(user);
     } catch (error: any) {
       alert(error.message);
     }
   };
 
-  const logout = () => {
-    setUser(authService.logout());
+  const logout = async () => {
+    await authService.logout();
+    setUser(null);
     setProfileMessage(null);
     onLogout?.();
   };
 
   const updateUserProfile = (updates: { email?: string; passwordChanged?: boolean }) => {
-    if (!user) return;
-    try {
-      const { updatedUser, messages } = authService.updateUserProfile(user, updates);
-      if (messages.length > 0) {
-        // Atualizar o usuário no localStorage também
-        const users: User[] = JSON.parse(localStorage.getItem('medshift-users') || '[]');
-        const updatedUsers = users.map(u => u.id === user.id ? updatedUser : u);
-        localStorage.setItem('medshift-users', JSON.stringify(updatedUsers));
-        
-        setUser(updatedUser);
-        setProfileMessage({ type: 'success', message: messages.join(' e ') + ' com sucesso!' });
-        clearProfileMessage();
-      } else {
-        setProfileMessage({ type: 'error', message: 'Nenhuma alteração foi detectada.' });
-        clearProfileMessage();
-      }
-    } catch (error) {
-      setProfileMessage({ type: 'error', message: 'Erro ao atualizar perfil. Tente novamente.' });
-      clearProfileMessage();
-    }
+    setProfileMessage({ type: 'error', message: 'Funcionalidade não implementada com Supabase Auth.' });
+    clearProfileMessage();
   };
 
   const setNotificationsEnabled = async (enabled: boolean) => {
-    if (!user) return;
-    try {
-      const updatedUser = await authService.setUserNotificationsEnabled(user.id, enabled);
-      setUser(updatedUser);
-    } catch (error) {
-      alert('Erro ao atualizar preferências de notificações.');
-    }
+    setProfileMessage({ type: 'error', message: 'Funcionalidade não implementada com Supabase Auth.' });
+    clearProfileMessage();
   };
 
   const contextValue: AuthContextType = {

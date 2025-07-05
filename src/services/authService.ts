@@ -3,6 +3,7 @@ import { User, AuditLog, LoginAttempt } from '../types';
 import { createNewUserNotification, saveNotification } from './notificationService';
 import { userRepository } from '../repositories';
 import { getMaxLoginAttempts, getBlockDuration, getAuthConfig } from '../config';
+import { supabase } from '../lib/supabaseClient';
 
 // Dados simulados em localStorage (para audit logs e login attempts)
 const AUDIT_LOGS_KEY = 'medshift-audit-logs';
@@ -93,70 +94,30 @@ const isAccountLocked = (email: string): boolean => {
   return recentFailedAttempts.length >= maxAttempts;
 };
 
-export async function login(email: string, password: string): Promise<User | null> {
-  await initializeDefaultData();
-  
-  // Verificar se conta está bloqueada
-  if (isAccountLocked(email)) {
-    logLoginAttempt(email, false);
-    const blockDurationMinutes = Math.floor(getBlockDuration() / (60 * 1000));
-    throw new Error(`Conta temporariamente bloqueada devido a múltiplas tentativas de login. Tente novamente em ${blockDurationMinutes} minutos.`);
-  }
-
-  const user = await userRepository.findByEmail(email);
-
-  if (!user || user.status !== 'active') {
-    logLoginAttempt(email, false);
-    throw new Error('Credenciais inválidas ou conta inativa.');
-  }
-
-  // Simular verificação de senha (em produção, seria hash + salt)
-  if (password !== '123456' && password !== 'admin123') {
-    logLoginAttempt(email, false);
-    throw new Error('Credenciais inválidas.');
-  }
-
-  // Atualizar último login
-  await userRepository.update(user.id, { lastLogin: new Date().toISOString() });
-
-  logLoginAttempt(email, true);
-  logAuditAction('LOGIN', 'Login realizado com sucesso', user.id, user.email);
-
-  return { ...user, lastLogin: new Date().toISOString() };
+export async function login(email: string, password: string) {
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) throw error;
+  return data.user;
 }
 
-export async function register(userData: { name: string; email: string; password: string; specialty?: string }): Promise<User> {
-  await initializeDefaultData();
-  
-  // Verificar se email já existe
-  const existingUser = await userRepository.findByEmail(userData.email);
-  if (existingUser) {
-    throw new Error('Email já está em uso. Tente fazer login ou use outro email.');
-  }
-
-  // Criar novo usuário
-  const newUserData: Omit<User, 'id'> = {
-    name: userData.name,
+export async function register(userData: { name: string; email: string; password: string; specialty?: string }) {
+  const { data, error } = await supabase.auth.signUp({
     email: userData.email,
-    specialty: userData.specialty,
-    role: 'user', // Novos usuários sempre começam como usuários comuns
-    status: 'active',
-    createdAt: new Date().toISOString(),
-    lastLogin: new Date().toISOString(),
-  };
-
-  const newUser = await userRepository.create(newUserData);
-
-  logAuditAction('REGISTRO', 'Novo usuário registrado', newUser.id, newUser.email);
-
-  // Criar notificação para superusuários
-  const notification = createNewUserNotification(newUser);
-  saveNotification(notification);
-
-  return newUser;
+    password: userData.password,
+    options: {
+      data: {
+        name: userData.name,
+        specialty: userData.specialty
+      }
+    }
+  });
+  if (error) throw error;
+  return data.user;
 }
 
-export function logout(): null {
+export async function logout() {
+  const { error } = await supabase.auth.signOut();
+  if (error) throw error;
   return null;
 }
 
